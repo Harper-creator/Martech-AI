@@ -1,0 +1,6 @@
+{
+  "name": "Martech+AI Consulting Suite",
+  "description": "A professional-grade Martech+AI solutions consultant platform enabling consultants, CSMs, BAs, and BDs to diagnose needs, architect marketing-ai integrations, plan high-quality deliveries, map business values, and refine pitches with the assistance of a server-side Gemini intelligence engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
