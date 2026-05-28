@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { LLMFactory } from "./src/services/llmProvider";
+import { LLMConfig, GenerateRequest } from "./src/types/llm";
 
 dotenv.config();
 
@@ -31,9 +33,9 @@ if (apiKey) {
 // Prompts helper
 function getSystemInstruction(mode: string, role: string) {
   const baseInstruction = `You are a World-Class Senior Martech + AI Strategic Solutions Architect and Managing Consultant (ex-McKinsey/Accenture/Salesforce Solution Director).
-Your mission is to empower the user—who could be a Deliver Lead (PMO), Customer Success Manager (CSM), Business Analyst (BA), or Business Development Director (BD)—to achieve an elite consultant's level of expertise, strategic depth, and professional polish.
+Your mission is to empower the user—who could be a Deliver Lead (PMO), Customer Success Manager (CSM), Business Analyst (BA), or Business Development Director (BD)—to achieve an elite consulta[...]
 
-You must deliver highly structured, practical, action-oriented, and industry-specific recommendations. Avoid generic advice, buzzword-heavy fluff, or empty promises. Provide rigorous, quantified frameworks, real-world tech stacks (CDP, CRM, GenAI, RAG, Marketing Automation integration), project plans, and value models.
+You must deliver highly structured, practical, action-oriented, and industry-specific recommendations. Avoid generic advice, buzzword-heavy fluff, or empty promises. Provide rigorous, quantified f[...]
 
 Always speak in professional Chinese (Simplified). Use markdown for styling and format with excellent spacing, tables, and crystal-clear bullet points.`;
 
@@ -91,7 +93,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", envHasKey: !!process.env.GEMINI_API_KEY });
 });
 
-// General AI generation endpoint
+// General AI generation endpoint (using Gemini - original)
 app.post("/api/generate", async (req, res) => {
   const { mode, role, industry, size, extraContext, customPrompt } = req.body;
 
@@ -121,7 +123,7 @@ ${extraContext || "No additional text provided. Provide a robust framework based
 
 === Requirement / 请生成： ===
 Based on your specialization of "${mode}", generate a highly strategic, professional, and action-oriented roadmap.
-Ensure to write with authority, combining Martech technologies with the latest AI capabilities (GenAI, RAG, hyper-personalization, CDP, LLM Orchestrator). Provide precise templates, checklists, and visual structures in markdown.
+Ensure to write with authority, combining Martech technologies with the latest AI capabilities (GenAI, RAG, hyper-personalization, CDP, LLM Orchestrator). Provide precise templates, checklists, a[...]
 `;
     }
 
@@ -138,6 +140,89 @@ Ensure to write with authority, combining Martech technologies with the latest A
   } catch (error: any) {
     console.error("Gemini Generation Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during generation." });
+  }
+});
+
+// New endpoint: LLM generation with configurable provider
+app.post("/api/generate-with-llm", async (req, res) => {
+  const { llmConfig, prompt, systemInstruction, temperature, maxTokens, mode, role, industry, size, extraContext, customPrompt } = req.body;
+
+  try {
+    // Use provided llmConfig or construct from legacy parameters
+    let config: LLMConfig;
+    if (llmConfig) {
+      config = llmConfig;
+    } else {
+      // Fallback to default DeepSeek if no config provided
+      config = {
+        provider: 'deepseek',
+        apiKey: process.env.DEEPSEEK_API_KEY || '',
+        model: 'deepseek-chat',
+      };
+    }
+
+    if (!config.apiKey) {
+      return res.status(400).json({
+        error: "API Key not provided. Please configure your LLM provider."
+      });
+    }
+
+    // Create provider instance
+    const provider = LLMFactory.createProvider(config);
+
+    // Construct prompt
+    let finalPrompt = prompt || customPrompt;
+    if (!finalPrompt && !customPrompt) {
+      const sysInstruction = getSystemInstruction(mode || 'chat', role || 'general');
+      finalPrompt = `
+=== Client profile ===
+- Industry / 行业: ${industry || "Not Specified / 未指定"}
+- Company Scale / 规模: ${size || "Not Specified"}
+- User Role / 当前用户角色: ${role || "Solutions Specialist"}
+- Mode / 期望诊断模块: ${mode || "General Strategic Consulting"}
+
+=== Detailed Context / 背景及痛点 ===
+${extraContext || "No additional text provided. Provide a robust framework based on typical challenges in this space."}
+`;
+      systemInstruction = sysInstruction;
+    }
+
+    const generateRequest: GenerateRequest = {
+      prompt: finalPrompt,
+      llmConfig: config,
+      systemInstruction,
+      temperature: temperature ?? 0.7,
+      maxTokens: maxTokens ?? 2000,
+    };
+
+    const response = await provider.generate(generateRequest);
+    res.json(response);
+  } catch (error: any) {
+    console.error("LLM Generation Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred during generation." });
+  }
+});
+
+// Endpoint to validate LLM configuration
+app.post("/api/validate-llm", async (req, res) => {
+  const { llmConfig } = req.body;
+
+  try {
+    if (!llmConfig || !llmConfig.apiKey) {
+      return res.status(400).json({ valid: false, error: "API Key required" });
+    }
+
+    const provider = LLMFactory.createProvider(llmConfig);
+    const testRequest: GenerateRequest = {
+      prompt: "你��，请回复一个字：是",
+      llmConfig,
+    };
+
+    const response = await provider.generate(testRequest);
+    res.json({ valid: true, message: "Configuration is valid", response });
+  } catch (error: any) {
+    console.error("LLM Validation Error:", error);
+    res.status(400).json({ valid: false, error: error.message });
   }
 });
 
