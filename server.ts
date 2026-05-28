@@ -3,8 +3,6 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { LLMFactory } from "./src/services/llmProvider";
-import { LLMConfig, GenerateRequest } from "./src/types/llm";
 
 dotenv.config();
 
@@ -33,9 +31,9 @@ if (apiKey) {
 // Prompts helper
 function getSystemInstruction(mode: string, role: string) {
   const baseInstruction = `You are a World-Class Senior Martech + AI Strategic Solutions Architect and Managing Consultant (ex-McKinsey/Accenture/Salesforce Solution Director).
-Your mission is to empower the user—who could be a Deliver Lead (PMO), Customer Success Manager (CSM), Business Analyst (BA), or Business Development Director (BD)—to achieve an elite consulta[...]
+Your mission is to empower the user—who could be a Deliver Lead (PMO), Customer Success Manager (CSM), Business Analyst (BA), or Business Development Director (BD)—to achieve an elite consultant's level of expertise, strategic depth, and professional polish.
 
-You must deliver highly structured, practical, action-oriented, and industry-specific recommendations. Avoid generic advice, buzzword-heavy fluff, or empty promises. Provide rigorous, quantified f[...]
+You must deliver highly structured, practical, action-oriented, and industry-specific recommendations. Avoid generic advice, buzzword-heavy fluff, or empty promises. Provide rigorous, quantified frameworks, real-world tech stacks (CDP, CRM, GenAI, RAG, Marketing Automation integration), project plans, and value models.
 
 Always speak in professional Chinese (Simplified). Use markdown for styling and format with excellent spacing, tables, and crystal-clear bullet points.`;
 
@@ -93,25 +91,27 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", envHasKey: !!process.env.GEMINI_API_KEY });
 });
 
-// General AI generation endpoint (using Gemini - original)
+// General AI generation endpoint
 app.post("/api/generate", async (req, res) => {
-  const { mode, role, industry, size, extraContext, customPrompt } = req.body;
+  const { 
+    mode, 
+    role, 
+    industry, 
+    size, 
+    extraContext, 
+    customPrompt, 
+    apiKey: reqApiKey, 
+    model: reqModel, 
+    provider = "gemini", 
+    apiBase = "" 
+  } = req.body;
 
-  if (!ai) {
-    return res.status(503).json({
-      error: "Gemini API Client is not initialized. Please verify your GEMINI_API_KEY configuration in Settings > Secrets."
-    });
-  }
-
-  try {
-    const systemInstruction = getSystemInstruction(mode || 'chat', role || 'general');
-    
-    // Construct prompt
-    let promptContent = "";
-    if (customPrompt) {
-      promptContent = customPrompt;
-    } else {
-      promptContent = `
+  const systemInstruction = getSystemInstruction(mode || 'chat', role || 'general');
+  let promptContent = "";
+  if (customPrompt) {
+    promptContent = customPrompt;
+  } else {
+    promptContent = `
 === Client profile ===
 - Industry / 行业: ${industry || "Not Specified / 未指定"}
 - Company Scale / 规模: ${size || "Not Specified"}
@@ -123,106 +123,100 @@ ${extraContext || "No additional text provided. Provide a robust framework based
 
 === Requirement / 请生成： ===
 Based on your specialization of "${mode}", generate a highly strategic, professional, and action-oriented roadmap.
-Ensure to write with authority, combining Martech technologies with the latest AI capabilities (GenAI, RAG, hyper-personalization, CDP, LLM Orchestrator). Provide precise templates, checklists, a[...]
+Ensure to write with authority, combining Martech technologies with the latest AI capabilities (GenAI, RAG, hyper-personalization, CDP, LLM Orchestrator). Provide precise templates, checklists, and visual structures in markdown.
 `;
-    }
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: promptContent,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
-    });
-
-    res.json({ text: response.text });
-  } catch (error: any) {
-    console.error("Gemini Generation Error:", error);
-    res.status(500).json({ error: error.message || "An error occurred during generation." });
   }
-});
 
-// New endpoint: LLM generation with configurable provider
-app.post("/api/generate-with-llm", async (req, res) => {
-  const { llmConfig, prompt, systemInstruction, temperature, maxTokens, mode, role, industry, size, extraContext, customPrompt } = req.body;
+  // Fallback check for provider type
+  if (provider === "openai") {
+    // Custom OpenAI compatible endpoint e.g., DeepSeek, OpenAI, Kimi, Local
+    const activeBaseUrl = (apiBase || "https://api.openai.com/v1").trim();
+    const activeApiKey = (reqApiKey || process.env.OPENAI_API_KEY || "").trim();
+    const activeModel = (reqModel || "gpt-4o-mini").trim();
 
-  try {
-    // Use provided llmConfig or construct from legacy parameters
-    let config: LLMConfig;
-    if (llmConfig) {
-      config = llmConfig;
-    } else {
-      // Fallback to default DeepSeek if no config provided
-      config = {
-        provider: 'deepseek',
-        apiKey: process.env.DEEPSEEK_API_KEY || '',
-        model: 'deepseek-chat',
-      };
-    }
-
-    if (!config.apiKey) {
+    if (!activeApiKey) {
       return res.status(400).json({
-        error: "API Key not provided. Please configure your LLM provider."
+        error: "未检测到 API Key。请在页面顶部的【AI配置面板】选择并输入您的第三方 API Key。"
       });
     }
 
-    // Create provider instance
-    const provider = LLMFactory.createProvider(config);
+    const endpoint = `${activeBaseUrl.replace(/\/+$/, "")}/chat/completions`;
+    try {
+      const fetchResponse = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${activeApiKey}`
+        },
+        body: JSON.stringify({
+          model: activeModel,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: promptContent }
+          ],
+          temperature: 0.7
+        })
+      });
 
-    // Construct prompt
-    let finalPrompt = prompt || customPrompt;
-    if (!finalPrompt && !customPrompt) {
-      const sysInstruction = getSystemInstruction(mode || 'chat', role || 'general');
-      finalPrompt = `
-=== Client profile ===
-- Industry / 行业: ${industry || "Not Specified / 未指定"}
-- Company Scale / 规模: ${size || "Not Specified"}
-- User Role / 当前用户角色: ${role || "Solutions Specialist"}
-- Mode / 期望诊断模块: ${mode || "General Strategic Consulting"}
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        throw new Error(`API 终结点返回了错误 (HTTP ${fetchResponse.status}): ${errorText || "未知错误"}`);
+      }
 
-=== Detailed Context / 背景及痛点 ===
-${extraContext || "No additional text provided. Provide a robust framework based on typical challenges in this space."}
-`;
-      systemInstruction = sysInstruction;
+      const data: any = await fetchResponse.json();
+      const resultText = data.choices?.[0]?.message?.content;
+      if (!resultText) {
+        throw new Error("API 响应中未找到 choices[0].message.content 字段，请核对您选择的模型或接口配置。");
+      }
+
+      return res.json({ text: resultText });
+    } catch (error: any) {
+      console.error("OpenAI Compatible API Error:", error);
+      return res.status(550).json({ error: error.message || "连接第三方 OpenAI 兼容端失败，请确认 API Key 及 Base URL 是否有误。" });
+    }
+  } else {
+    // Standard Google Gemini SDK flow
+    const activeApiKey = reqApiKey || process.env.GEMINI_API_KEY;
+    const activeModel = reqModel || "gemini-3.5-flash";
+
+    if (!activeApiKey) {
+      return res.status(400).json({
+        error: "未检测到 API Key。请在页面顶部的【AI配置面板】输入您的 Gemini API 秘钥，或者联系管理员配置系统变量。"
+      });
     }
 
-    const generateRequest: GenerateRequest = {
-      prompt: finalPrompt,
-      llmConfig: config,
-      systemInstruction,
-      temperature: temperature ?? 0.7,
-      maxTokens: maxTokens ?? 2000,
-    };
-
-    const response = await provider.generate(generateRequest);
-    res.json(response);
-  } catch (error: any) {
-    console.error("LLM Generation Error:", error);
-    res.status(500).json({ error: error.message || "An error occurred during generation." });
-  }
-});
-
-// Endpoint to validate LLM configuration
-app.post("/api/validate-llm", async (req, res) => {
-  const { llmConfig } = req.body;
-
-  try {
-    if (!llmConfig || !llmConfig.apiKey) {
-      return res.status(400).json({ valid: false, error: "API Key required" });
+    // Create an on-the-fly client with the active key
+    let activeAi: GoogleGenAI;
+    try {
+      activeAi = new GoogleGenAI({
+        apiKey: activeApiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        error: `Gemini API Key 格式或初始化失败: ${err.message}`
+      });
     }
 
-    const provider = LLMFactory.createProvider(llmConfig);
-    const testRequest: GenerateRequest = {
-      prompt: "你��，请回复一个字：是",
-      llmConfig,
-    };
+    try {
+      const response = await activeAi.models.generateContent({
+        model: activeModel,
+        contents: promptContent,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
+      });
 
-    const response = await provider.generate(testRequest);
-    res.json({ valid: true, message: "Configuration is valid", response });
-  } catch (error: any) {
-    console.error("LLM Validation Error:", error);
-    res.status(400).json({ valid: false, error: error.message });
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("Gemini Generation Error:", error);
+      res.status(550).json({ error: error.message || "An error occurred during Gemini generation." });
+    }
   }
 });
 
