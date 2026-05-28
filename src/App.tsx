@@ -975,7 +975,7 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
     try {
       const data = await requestAI({
         customPrompt: dialogPrompt,
-        apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
+        apiKey: (apiProvider === "openai" ? (openAiApiKey || apiKey) : (apiKey || openAiApiKey)).trim(),
         model: selectedModel,
         provider: apiProvider,
         apiBase: customApiBase,
@@ -1041,7 +1041,7 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
         industry: preset.name,
         size: selectedSize,
         extraContext: `${kpiContextString}\n\n${extraContext}`,
-        apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
+        apiKey: (apiProvider === "openai" ? (openAiApiKey || apiKey) : (apiKey || openAiApiKey)).trim(),
         model: selectedModel,
         provider: apiProvider,
         apiBase: customApiBase,
