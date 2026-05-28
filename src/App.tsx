@@ -225,6 +225,135 @@ const METRIC_HELP_DATABASE: Record<string, MetricHelpContent> = {
   }
 };
 
+async function callDirectClientAI(payload: {
+  customPrompt?: string;
+  mode?: string;
+  role?: string;
+  industry?: string;
+  size?: string;
+  extraContext?: string;
+  apiKey: string;
+  model: string;
+  provider: string;
+  apiBase?: string;
+}) {
+  const { provider, apiKey, model, apiBase, customPrompt, mode, role, industry, size, extraContext } = payload;
+  
+  const getClientSystemInstruction = (modeVal: string, roleVal: string) => {
+    const baseInstruction = `You are a World-Class Senior Martech + AI Strategic Solutions Architect and Managing Consultant (ex-McKinsey/Accenture/Salesforce Solution Director).
+Your mission is to empower the user—who could be a Deliver Lead (PMO), Customer Success Manager (CSM), Business Analyst (BA), or Business Development Director (BD)—to achieve an elite consultant's level of expertise, strategic depth, and professional polish.
+
+You must deliver highly structured, practical, action-oriented, and industry-specific recommendations. Avoid generic advice, buzzword-heavy fluff, or empty promises. Provide rigorous, quantified frameworks, real-world tech stacks (CDP, CRM, GenAI, RAG, Marketing Automation integration), project plans, and value models.
+
+Always speak in professional Chinese (Simplified). Use markdown for styling and format with excellent spacing, tables, and crystal-clear bullet points.`;
+
+    switch(modeVal) {
+      case 'diagnose':
+        return `${baseInstruction}\n\nFocus strictly on customer demand diagnosis, deep business discovery, and pain-point analysis for different industries.\nProvide:\n1. Dynamic Pre-consultation Discovery Questionnaire (5 key discovery questions with clear business rationale for asking).\n2. Deep Pain-point Analysis Matrix tailored to their industry and size.\n3. Diagnostic scoring framework (Diagnostic Assessment Metrics with standard parameters).\nLet the user feel like an elite business analyst.`;
+      case 'architect':
+        return `${baseInstruction}\n\nFocus on Technical and Business Integration Architecture. \nProvide a clear blueprints or block-logic proposal highlighting:\n1. Data Layer: Where does client-data sit? (CDP, Lakehouse, CRM, SDKs)\n2. Intelligence Layer: AI engines (RAG, LLM agent pools, Predictive ML, DSP, LLM-based content generators) and orchestrators.\n3. Execution & Channel Layer: Touchpoints (SMS, Email, Web, WeChat, App, Customer Service Desk).\n4. System Integration Checklist (APIs, Webhooks, Privacy & Compliance - e.g. GDPR, PIPL).\nUse Markdown tables or flow charts (using text boundaries or simple tables) to design the visual flow blocks.`;
+      case 'delivery-plan':
+        return `${baseInstruction}\n\nFocus on PMO, Delivery, and Project Management.\nProvide:\n1. Rigorous Deliver Roadmap (Phase 1-4, key durations, deliverables, and dependencies).\n2. Martech+AI RACI Chart (Who does What: Client Marketing, Client IT, Consulting Team PM, Solution SA, Success Manager).\n3. Risk & Mitigation Register (GDPR/Compliance, data silo integration bottlenecks, model hallucinations, adoption speed) in a Markdown table.`;
+      case 'csm-kpi':
+        return `${baseInstruction}\n\nFocus on Customer Success, Business Metrics, Value Realization, and Optimization.\nProvide:\n1. Core Value Tree (strategic goals mapped to operational KPIs, showing mathematical relations, and how Martech+AI lifts each).\n2. CSM Value Realization Action Playbook (First 30-60-90-180 days plan).\n3. Retention and LTV Optimization Strategy.`;
+      case 'bd-pitch':
+        return `${baseInstruction}\n\nFocus on BD, Sales Pitches, Client Proposals, and Client Relationship Nurturing.\nProvide:\n1. Executive Summary Elevator Pitch (Perfect script for a senior executive client).\n2. Value Proposition Grid mapped to standard corporate buyer personas (CMO, CIO, CFO, CEO).\n3. Tailored Email Pitch Outline or Proposal First-meet Script.`;
+      default:
+        return baseInstruction;
+    }
+  };
+
+  const systemInstruction = getClientSystemInstruction(mode || 'chat', role || 'general');
+
+  let promptContent = "";
+  if (customPrompt) {
+    promptContent = customPrompt;
+  } else {
+    promptContent = `
+=== Client profile ===
+- Industry / 行业: ${industry || "Not Specified / 未指定"}
+- Company Scale / 规模: ${size || "Not Specified"}
+- User Role / 当前用户角色: ${role || "Solutions Specialist"}
+- Mode / 期望诊断模块: ${mode || "General Strategic Consulting"}
+
+=== Detailed Context / 背景及痛点 ===
+${extraContext || "No additional text provided. Provide a robust framework based on typical challenges in this space."}
+
+=== Requirement / 请生成： ===
+Based on your specialization of "${mode}", generate a highly strategic, professional, and action-oriented roadmap.
+Ensure to write with authority, combining Martech technologies with the latest AI capabilities (GenAI, RAG, hyper-personalization, CDP, LLM Orchestrator). Provide precise templates, checklists, and visual structures in markdown.
+`;
+  }
+
+  if (provider === "openai") {
+    const activeBaseUrl = (apiBase || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+    const endpoint = `${activeBaseUrl}/chat/completions`;
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model || "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: promptContent }
+        ],
+        temperature: 0.7
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`(Client Direct OpenAI API Error ${res.status}): ${errorText || "Unknown error"}`);
+    }
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) {
+      throw new Error("Client Direct OpenAI response structure mismatch");
+    }
+    return { text };
+  } else {
+    // Gemini direct call using standard REST v1beta API
+    const activeModel = model || "gemini-1.5-flash";
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`;
+    
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `${systemInstruction}\n\n${promptContent}`
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.7
+        }
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`(Client Direct Gemini API Error ${res.status}): ${errorText || "Unknown error"}`);
+    }
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw new Error("Client Direct Gemini response structure mismatch");
+    }
+    return { text };
+  }
+}
+
 export default function App() {
   // Config States
   const [selectedIndustry, setSelectedIndustry] = useState<string>("ecom");
@@ -298,6 +427,61 @@ export default function App() {
   });
   const [activeHelpKey, setActiveHelpKey] = useState<string | null>(null);
   const [serverHasKey, setServerHasKey] = useState<boolean>(false);
+
+  const requestAI = async (payload: {
+    customPrompt?: string;
+    mode?: string;
+    role?: string;
+    industry?: string;
+    size?: string;
+    extraContext?: string;
+    apiKey: string;
+    model: string;
+    provider: string;
+    apiBase?: string;
+  }) => {
+    // Detect GitHub Pages or static host environment
+    const isStaticHost = 
+      window.location.hostname.endsWith('github.io') || 
+      window.location.hostname.includes('github.preview') ||
+      window.location.protocol === 'file:';
+
+    if (isStaticHost) {
+      console.log("Static host detected (like GitHub Pages). Calling Gemini/OpenAI directly from client side.");
+      return await callDirectClientAI(payload);
+    }
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        // If the backend returns 404 or 405 (meaning we are running as a purely static site now),
+        // or any other typical server failure, let's gracefully fall back to direct browser call.
+        if (response.status === 404 || response.status === 405 || response.status >= 500) {
+          console.warn(`Backend returned ${response.status}. Falling back to direct client-side request.`);
+          return await callDirectClientAI(payload);
+        }
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (err: any) {
+      // If server is unreachable or fetch fails with connection etc. (e.g., net::ERR_CONNECTION_REFUSED)
+      console.warn("Express backend server unreachable. Gracefully falling back to client-side direct request.", err);
+      try {
+        return await callDirectClientAI(payload);
+      } catch (fallbackErr: any) {
+        throw new Error(fallbackErr.message || err.message);
+      }
+    }
+  };
 
   const renderHelpTrigger = (key: string) => {
     return (
@@ -789,26 +973,14 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
 `;
 
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customPrompt: dialogPrompt,
-          apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
-          model: selectedModel,
-          provider: apiProvider,
-          apiBase: customApiBase,
-        }),
+      const data = await requestAI({
+        customPrompt: dialogPrompt,
+        apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
+        model: selectedModel,
+        provider: apiProvider,
+        apiBase: customApiBase,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
       if (data.text) {
         const aiResponseText = data.text;
         setAiResultText(aiResponseText);
@@ -863,30 +1035,18 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
 
     try {
       const preset = INDUSTRY_PRESETS.find(p => p.id === selectedIndustry) || INDUSTRY_PRESETS[0];
-       const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode: mode,
-          role: selectedRole,
-          industry: preset.name,
-          size: selectedSize,
-          extraContext: `${kpiContextString}\n\n${extraContext}`,
-          apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
-          model: selectedModel,
-          provider: apiProvider,
-          apiBase: customApiBase,
-        }),
+      const data = await requestAI({
+        mode: mode,
+        role: selectedRole,
+        industry: preset.name,
+        size: selectedSize,
+        extraContext: `${kpiContextString}\n\n${extraContext}`,
+        apiKey: apiProvider === "openai" ? openAiApiKey : apiKey,
+        model: selectedModel,
+        provider: apiProvider,
+        apiBase: customApiBase,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
       if (data.text) {
         setAiResultText(data.text);
         saveToHistory(data.text);
