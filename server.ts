@@ -106,6 +106,9 @@ app.post("/api/generate", async (req, res) => {
     apiBase = "" 
   } = req.body;
 
+  const anonymizedKey = reqApiKey ? `${reqApiKey.slice(0, 6)}...${reqApiKey.slice(-4)} (length: ${reqApiKey.length})` : "None";
+  console.log(`[API Generate Router] Received request. Provider: ${provider}, Model: ${reqModel}, Base: ${apiBase}, Key: ${anonymizedKey}`);
+
   const systemInstruction = getSystemInstruction(mode || 'chat', role || 'general');
   let promptContent = "";
   if (customPrompt) {

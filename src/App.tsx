@@ -1124,6 +1124,7 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
                 setApiProvider("gemini");
                 localStorage.setItem("martech_api_provider", "gemini");
                 setSelectedModel("gemini-3.5-flash");
+                localStorage.setItem("martech_gemini_selected_model", "gemini-3.5-flash");
               }}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
                 apiProvider === "gemini"
@@ -1138,6 +1139,7 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
                 setApiProvider("openai");
                 localStorage.setItem("martech_api_provider", "openai");
                 setSelectedModel("deepseek-chat");
+                localStorage.setItem("martech_gemini_selected_model", "deepseek-chat");
               }}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
                 apiProvider === "openai"
@@ -2615,7 +2617,27 @@ ${chatHistory.map(h => `${h.sender === "user" ? "用户" : "AI助手"}: ${h.text
                 <div className="bg-amber-50 border border-amber-200/60 p-4 rounded-xl flex gap-3 text-amber-800 text-xs mb-4">
                   <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0" />
                   <div>
-                    <h4 className="font-bold">连接到 AI 服务时遇到了合规性限制/或缺失 API Key</h4>
+                    <h4 className="font-bold">
+                      {(() => {
+                        const err = aiError.toLowerCase();
+                        if (err.includes("401") || err.includes("unauthorized") || err.includes("invalid_key") || err.includes("invalid api key") || err.includes("auth")) {
+                          return "🔑 API 密钥校验未通过 (大模型服务商返回 401 授权失败)";
+                        }
+                        if (err.includes("402") || err.includes("balance") || err.includes("insufficient") || err.includes("credit") || err.includes("欠费")) {
+                          return "💳 第三方 API 账户余额不足或已欠费 (大模型服务商返回 402/欠费)";
+                        }
+                        if (err.includes("429") || err.includes("rate limit") || err.includes("too many requests")) {
+                          return "⏳ 触发第三方接口限频保护 (服务商返回 429 Too Many Requests)";
+                        }
+                        if (err.includes("404") || err.includes("not found")) {
+                          return "🔍 模型名或 API 端点格式错误 (大模型服务商返回 404 Not Found)";
+                        }
+                        if (err.includes("未检测到") || err.includes("missing api key")) {
+                          return "⚠️ 请在顶部【AI组件配置中心】填写或核对您的 API Key 密钥";
+                        }
+                        return "🚨 AI 服务链接建立失败或第三方接口返回异常";
+                      })()}
+                    </h4>
                     <p className="mt-1 leading-relaxed">
                       {aiError}
                     </p>
